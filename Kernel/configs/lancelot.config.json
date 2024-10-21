@@ -2,7 +2,7 @@
     {
         "kernelSource": {
             "name": "Redmi 9",
-            "repo": "https://github.com/novakin777/android_kernel_xiaomi_mt6768",
+            "repo": "https://github.com/LineageOS/android_kernel_xiaomi_mt6768.git",
             "branch": "linage-20",
             "device": "lancelot-R-oss",
             "defconfig": "arch/arm64/configs/lancelot_defconfig"
