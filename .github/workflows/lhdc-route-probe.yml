@@ -23,7 +23,7 @@ jobs:
       - name: Package probe
         run: |
           mkdir -p dist
-          cp System/LHDC/x17_qti_software_session_route_v01.js dist/
+          cp System/LHDC/x17_qti_software_session_route_v02.js dist/
           cp System/LHDC/README_RU.md dist/
           sha256sum dist/*
           zip -j dist/X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v03.zip dist/*
@@ -32,4 +32,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v03
-          path: dist/X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v02.zip
+          path: dist/X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v03.zip
