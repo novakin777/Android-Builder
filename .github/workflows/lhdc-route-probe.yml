@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Verify JavaScript syntax
-        run: node --check System/LHDC/x17_qti_software_session_route_v01.js
+        run: node --check System/LHDC/x17_qti_software_session_route_v02.js
 
       - name: Package probe
         run: |
@@ -26,10 +26,10 @@ jobs:
           cp System/LHDC/x17_qti_software_session_route_v01.js dist/
           cp System/LHDC/README_RU.md dist/
           sha256sum dist/*
-          zip -j dist/X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v02.zip dist/*
+          zip -j dist/X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v03.zip dist/*
 
       - name: Upload probe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v02
+          name: X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v03
           path: dist/X17_LHDC_QTI_SOFTWARE_SESSION_ROUTE_v02.zip
