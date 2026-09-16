@@ -37,7 +37,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          SDKMANAGER="$(command -v sdkmanager)"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager -perm -111 | sort -V | tail -n1)"
+          fi
+          test -x "$SDKMANAGER"
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "sdkmanager=$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
