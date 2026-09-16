@@ -1,5 +1,10 @@
 package dev.watchtrust;
 
+import android.app.KeyguardManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.SystemClock;
 import android.service.trust.TrustAgentService;
 import android.util.Log;
@@ -12,16 +17,42 @@ public final class WatchTrustAgent extends TrustAgentService {
     private static volatile WatchTrustAgent instance;
     private static volatile long manualTestUntilElapsed = 0L;
 
+    private KeyguardManager keyguardManager;
+
+    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                handleScreenOn();
+            } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                Log.i(TAG, "SCREEN_OFF");
+            }
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
+        keyguardManager = getSystemService(KeyguardManager.class);
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenReceiver, filter);
+
         setManagingTrust(true);
-        Log.i(TAG, "TrustAgent created; managingTrust=true");
+        Log.i(TAG, "TrustAgent created; managingTrust=true; screen receiver registered");
     }
 
     @Override
     public void onDestroy() {
+        try {
+            unregisterReceiver(screenReceiver);
+        } catch (Exception ignored) {
+        }
+
         if (instance == this) instance = null;
         manualTestUntilElapsed = 0L;
         setManagingTrust(false);
@@ -42,23 +73,10 @@ public final class WatchTrustAgent extends TrustAgentService {
         Log.i(TAG, "Phone device locked; watchEligible=" + watchEligible
                 + " manualArmed=" + manualArmed);
 
-        // Narrow diagnostic experiment:
-        // Android reliably calls onDeviceLocked() on this device, while
-        // onUserRequestedUnlock() is not observed. If manual test is armed,
-        // re-grant renewable trust immediately from this callback so we can
-        // test TRUSTABLE -> TRUSTED renewal independently of the watch side.
-        if (manualArmed) {
-            int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
-                    | FLAG_GRANT_TRUST_INITIATED_BY_USER
-                    | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
-            grantTrust("WatchTrust manual locked regrant", TRUST_MS, flags);
-            Log.i(TAG, "Manual locked regrant sent; flags=" + flags);
-            return;
-        }
-
-        if (watchEligible) {
-            grantPassiveTrust();
-        }
+        // IMPORTANT: do not re-grant with DISMISS_KEYGUARD here.
+        // onDeviceLocked() is also called when the user intentionally turns
+        // the screen off. Re-granting here wakes/unlocks the phone immediately.
+        // We now wait for ACTION_SCREEN_ON and only then perform the renewal.
     }
 
     @Override
@@ -78,19 +96,37 @@ public final class WatchTrustAgent extends TrustAgentService {
                 + " eligible=" + eligible);
 
         if (!eligible) {
-            revokeTrust();
             return;
         }
 
-        int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
-                | FLAG_GRANT_TRUST_INITIATED_BY_USER;
-        if (dismissKeyguard) {
-            flags |= FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
-        }
+        grantUnlockTrust(manualArmed ? "WatchTrust manual active unlock" : "Xiaomi Watch 5");
+    }
 
-        grantTrust(manualArmed ? "WatchTrust manual active unlock" : "Xiaomi Watch 5",
-                TRUST_MS, flags);
-        Log.i(TAG, "Active unlock grant sent; flags=" + flags);
+    private void handleScreenOn() {
+        boolean watchEligible = WatchStateStore.isEligible();
+        boolean manualArmed = isManualTestArmed();
+        boolean eligible = watchEligible || manualArmed;
+        boolean deviceLocked = keyguardManager != null && keyguardManager.isDeviceLocked();
+
+        Log.i(TAG, "SCREEN_ON; deviceLocked=" + deviceLocked
+                + " watchEligible=" + watchEligible
+                + " manualArmed=" + manualArmed
+                + " eligible=" + eligible);
+
+        if (deviceLocked && eligible) {
+            grantUnlockTrust(manualArmed
+                    ? "WatchTrust manual screen-on unlock"
+                    : "Xiaomi Watch 5");
+        }
+    }
+
+    private void grantUnlockTrust(String message) {
+        int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
+                | FLAG_GRANT_TRUST_INITIATED_BY_USER
+                | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
+
+        grantTrust(message, TRUST_MS, flags);
+        Log.i(TAG, "Screen-on unlock grant sent; flags=" + flags + " message=" + message);
     }
 
     private void grantPassiveTrust() {
@@ -103,6 +139,8 @@ public final class WatchTrustAgent extends TrustAgentService {
         if (agent == null) return;
 
         if (WatchStateStore.isEligible()) {
+            // Keep renewable trust alive while the watch is eligible, but do
+            // not force-dismiss keyguard just because the watch state changed.
             agent.grantPassiveTrust();
         } else {
             agent.revokeTrust();
