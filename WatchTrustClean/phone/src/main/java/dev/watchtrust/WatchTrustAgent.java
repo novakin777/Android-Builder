@@ -1,68 +1,27 @@
 package dev.watchtrust;
 
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.SystemClock;
 import android.service.trust.TrustAgentService;
 import android.util.Log;
 
 public final class WatchTrustAgent extends TrustAgentService {
     private static final String TAG = "WatchTrust";
-    private static final String ACTION_BOUNCER_SHOWN =
-            "dev.watchtrust.action.BOUNCER_SHOWN";
-    private static final String SYSTEMUI_PERMISSION =
-            "android.permission.STATUS_BAR_SERVICE";
-
     private static final long TRUST_MS = 20_000L;
     private static final long MANUAL_TEST_MS = 30_000L;
 
     private static volatile WatchTrustAgent instance;
     private static volatile long manualTestUntilElapsed = 0L;
 
-    private final BroadcastReceiver bouncerReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null || !ACTION_BOUNCER_SHOWN.equals(intent.getAction())) {
-                return;
-            }
-
-            String reason = intent.getStringExtra("reason");
-            boolean scrimmed = intent.getBooleanExtra("scrimmed", false);
-
-            Log.i(TAG, "Bouncer signal received; reason=" + reason
-                    + " scrimmed=" + scrimmed);
-
-            onBouncerShown(reason);
-        }
-    };
-
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
-
-        IntentFilter filter = new IntentFilter(ACTION_BOUNCER_SHOWN);
-        registerReceiver(
-                bouncerReceiver,
-                filter,
-                SYSTEMUI_PERMISSION,
-                null,
-                Context.RECEIVER_EXPORTED
-        );
-
         setManagingTrust(true);
-        Log.i(TAG, "TrustAgent created; managingTrust=true; bouncer receiver registered");
+        Log.i(TAG, "TrustAgent created; managingTrust=true");
     }
 
     @Override
     public void onDestroy() {
-        try {
-            unregisterReceiver(bouncerReceiver);
-        } catch (Throwable ignored) {
-        }
-
         if (instance == this) instance = null;
         manualTestUntilElapsed = 0L;
         setManagingTrust(false);
@@ -101,7 +60,7 @@ public final class WatchTrustAgent extends TrustAgentService {
         Log.i(TAG, "CB onUserRequestedUnlock dismiss=" + dismissKeyguard);
     }
 
-    private static void onBouncerShown(String reason) {
+    public static void onBouncerShown(String reason) {
         WatchTrustAgent agent = instance;
         if (agent == null) {
             Log.w(TAG, "Bouncer signal ignored: TrustAgent is not running");
