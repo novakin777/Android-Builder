@@ -1,0 +1,130 @@
+name: WatchTrust Clean
+
+on:
+  push:
+    branches:
+      - watchtrust-clean
+    paths:
+      - 'WatchTrustClean/**'
+      - '.github/workflows/watchtrust-clean.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: WatchTrustClean
+  ANDROID_API: '35'
+  BUILD_TOOLS: '35.0.0'
+  GRADLE_VERSION: '8.11.1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Expand source bundle
+        run: |
+          unzip -o WatchTrustClean/source.zip -d WatchTrustClean
+          test -f WatchTrustClean/settings.gradle.kts
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-${ANDROID_API}" "build-tools;${BUILD_TOOLS}"
+
+      - name: Restore stable debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: watchtrust-debug-keystore-v1
+
+      - name: Create debug signing key if missing
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA -keysize 2048 -validity 10000
+          fi
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android \
+            | grep -E 'SHA256:|Alias name:' || true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Build phone and Wear OS APKs
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          gradle --version
+          gradle --stacktrace --no-daemon :phone:assembleDebug :wear:assembleDebug
+
+      - name: Inspect APKs
+        run: |
+          AAPT="$ANDROID_HOME/build-tools/${BUILD_TOOLS}/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/${BUILD_TOOLS}/apksigner"
+          PHONE="$PROJECT_DIR/phone/build/outputs/apk/debug/phone-debug.apk"
+          WEAR="$PROJECT_DIR/wear/build/outputs/apk/debug/wear-debug.apk"
+
+          "$AAPT" dump badging "$PHONE" | head -n 5
+          "$AAPT" dump badging "$WEAR" | head -n 5
+          "$APKSIGNER" verify --verbose --print-certs "$PHONE"
+          "$APKSIGNER" verify --verbose --print-certs "$WEAR"
+
+          PHONE_CERT=$("$APKSIGNER" verify --print-certs "$PHONE" | sed -n 's/Signer #1 certificate SHA-256 digest: //p' | head -n1)
+          WEAR_CERT=$("$APKSIGNER" verify --print-certs "$WEAR" | sed -n 's/Signer #1 certificate SHA-256 digest: //p' | head -n1)
+          echo "phone cert: $PHONE_CERT"
+          echo "wear  cert: $WEAR_CERT"
+          test -n "$PHONE_CERT"
+          test "$PHONE_CERT" = "$WEAR_CERT"
+
+      - name: Build KernelSU module
+        run: |
+          rm -rf dist
+          mkdir -p dist/module/system/priv-app/WatchTrust
+          mkdir -p dist/module/system/etc/permissions
+
+          cp "$PROJECT_DIR/phone/build/outputs/apk/debug/phone-debug.apk" \
+            dist/module/system/priv-app/WatchTrust/WatchTrust.apk
+          cp "$PROJECT_DIR/ksu-module/module.prop" dist/module/module.prop
+          cp "$PROJECT_DIR/ksu-module/customize.sh" dist/module/customize.sh
+          cp "$PROJECT_DIR/ksu-module/system/etc/permissions/privapp-permissions-watchtrust.xml" \
+            dist/module/system/etc/permissions/privapp-permissions-watchtrust.xml
+
+          chmod 0755 dist/module/customize.sh
+          (cd dist/module && zip -9 -r ../WatchTrust-KSU-debug.zip .)
+
+          cp "$PROJECT_DIR/phone/build/outputs/apk/debug/phone-debug.apk" dist/WatchTrust-phone-debug.apk
+          cp "$PROJECT_DIR/wear/build/outputs/apk/debug/wear-debug.apk" dist/WatchTrust-wear-debug.apk
+          sha256sum dist/*.apk dist/*.zip | tee dist/SHA256SUMS.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WatchTrustClean-${{ github.run_number }}
+          path: |
+            dist/WatchTrust-phone-debug.apk
+            dist/WatchTrust-wear-debug.apk
+            dist/WatchTrust-KSU-debug.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
