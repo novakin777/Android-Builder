@@ -1,0 +1,6 @@
+id=watchtrust_clean
+name=WatchTrust Clean
+version=1.0-clean
+versionCode=100
+author=OpenAI + novakin777
+description=Privileged TrustAgent for WatchTrust phone app.

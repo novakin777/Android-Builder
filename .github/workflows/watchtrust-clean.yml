@@ -27,11 +27,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Expand source bundle
-        run: |
-          unzip -o WatchTrustClean/source.zip -d WatchTrustClean
-          test -f WatchTrustClean/settings.gradle.kts
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
