@@ -1,27 +1,68 @@
 package dev.watchtrust;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.SystemClock;
 import android.service.trust.TrustAgentService;
 import android.util.Log;
 
 public final class WatchTrustAgent extends TrustAgentService {
     private static final String TAG = "WatchTrust";
+    private static final String ACTION_BOUNCER_SHOWN =
+            "dev.watchtrust.action.BOUNCER_SHOWN";
+    private static final String SYSTEMUI_PERMISSION =
+            "android.permission.STATUS_BAR_SERVICE";
+
     private static final long TRUST_MS = 20_000L;
     private static final long MANUAL_TEST_MS = 30_000L;
 
     private static volatile WatchTrustAgent instance;
     private static volatile long manualTestUntilElapsed = 0L;
 
+    private final BroadcastReceiver bouncerReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null || !ACTION_BOUNCER_SHOWN.equals(intent.getAction())) {
+                return;
+            }
+
+            String reason = intent.getStringExtra("reason");
+            boolean scrimmed = intent.getBooleanExtra("scrimmed", false);
+
+            Log.i(TAG, "Bouncer signal received; reason=" + reason
+                    + " scrimmed=" + scrimmed);
+
+            onBouncerShown(reason);
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
+
+        IntentFilter filter = new IntentFilter(ACTION_BOUNCER_SHOWN);
+        registerReceiver(
+                bouncerReceiver,
+                filter,
+                SYSTEMUI_PERMISSION,
+                null,
+                Context.RECEIVER_EXPORTED
+        );
+
         setManagingTrust(true);
-        Log.i(TAG, "TrustAgent created; diagnostic mode; managingTrust=true");
+        Log.i(TAG, "TrustAgent created; managingTrust=true; bouncer receiver registered");
     }
 
     @Override
     public void onDestroy() {
+        try {
+            unregisterReceiver(bouncerReceiver);
+        } catch (Throwable ignored) {
+        }
+
         if (instance == this) instance = null;
         manualTestUntilElapsed = 0L;
         setManagingTrust(false);
@@ -47,38 +88,61 @@ public final class WatchTrustAgent extends TrustAgentService {
 
     @Override
     public void onUnlockAttempt(boolean successful) {
-        Log.i(TAG, "CB onUnlockAttempt successful=" + successful
-                + " manualArmed=" + isManualTestArmed());
+        Log.i(TAG, "CB onUnlockAttempt successful=" + successful);
     }
 
     @Override
     public void onUserMayRequestUnlock() {
-        Log.i(TAG, "CB onUserMayRequestUnlock; watchEligible=" + WatchStateStore.isEligible()
-                + " manualArmed=" + isManualTestArmed());
+        Log.i(TAG, "CB onUserMayRequestUnlock");
     }
 
     @Override
     public void onUserRequestedUnlock(boolean dismissKeyguard) {
-        Log.i(TAG, "CB onUserRequestedUnlock dismiss=" + dismissKeyguard
-                + " watchEligible=" + WatchStateStore.isEligible()
-                + " manualArmed=" + isManualTestArmed());
+        Log.i(TAG, "CB onUserRequestedUnlock dismiss=" + dismissKeyguard);
+    }
 
-        // Diagnostic build: deliberately DO NOT call grantTrust() here.
-        // We first want to see which callback fires exactly when the user swipes
-        // to the credential/bouncer screen on this PixelOS Android 17 build.
+    private static void onBouncerShown(String reason) {
+        WatchTrustAgent agent = instance;
+        if (agent == null) {
+            Log.w(TAG, "Bouncer signal ignored: TrustAgent is not running");
+            return;
+        }
+
+        boolean watchEligible = WatchStateStore.isEligible();
+        boolean manualArmed = isManualTestArmed();
+        boolean eligible = watchEligible || manualArmed;
+
+        Log.i(TAG, "Bouncer shown; reason=" + reason
+                + " watchEligible=" + watchEligible
+                + " manualArmed=" + manualArmed
+                + " eligible=" + eligible);
+
+        if (!eligible) {
+            return;
+        }
+
+        int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
+                | FLAG_GRANT_TRUST_INITIATED_BY_USER
+                | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
+
+        agent.grantTrust(
+                manualArmed
+                        ? "WatchTrust manual bouncer unlock"
+                        : "Xiaomi Watch 5",
+                TRUST_MS,
+                flags
+        );
+
+        Log.i(TAG, "Bouncer unlock grant sent; flags=" + flags);
     }
 
     public static void onWatchStateChanged() {
         WatchTrustAgent agent = instance;
         if (agent == null) return;
 
-        // Diagnostic build: never auto-unlock from watch state changes.
-        // Revoke when watch becomes ineligible so stale trust cannot survive.
         if (!WatchStateStore.isEligible()) {
             agent.revokeTrust();
             Log.i(TAG, "Watch became ineligible; trust revoked");
-        } else {
-            Log.i(TAG, "Watch eligible state received; diagnostic mode does not grant trust");
         }
     }
 
@@ -86,26 +150,26 @@ public final class WatchTrustAgent extends TrustAgentService {
         WatchTrustAgent agent = instance;
         if (agent == null) return false;
 
-        manualTestUntilElapsed = SystemClock.elapsedRealtime() + MANUAL_TEST_MS;
+        manualTestUntilElapsed =
+                SystemClock.elapsedRealtime() + MANUAL_TEST_MS;
 
-        // Arm a renewable trust window while the phone is already unlocked.
-        // After the screen is turned off, Android can downgrade it to TRUSTABLE.
-        // The diagnostic callbacks above will reveal what happens when the user
-        // explicitly swipes to the PIN/password bouncer. No callback re-grants.
         int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
                 | FLAG_GRANT_TRUST_INITIATED_BY_USER;
-        agent.grantTrust("WatchTrust diagnostic arm", TRUST_MS, flags);
-        Log.i(TAG, "Diagnostic manual window armed for " + MANUAL_TEST_MS
-                + " ms; initial renewable grant flags=" + flags);
+
+        agent.grantTrust("WatchTrust manual arm", TRUST_MS, flags);
+        Log.i(TAG, "Manual test armed for " + MANUAL_TEST_MS
+                + " ms; flags=" + flags);
         return true;
     }
 
     public static boolean manualRevoke() {
         WatchTrustAgent agent = instance;
         manualTestUntilElapsed = 0L;
+
         if (agent == null) return false;
+
         agent.revokeTrust();
-        Log.i(TAG, "Diagnostic manual window disarmed; trust revoked");
+        Log.i(TAG, "Manual test disarmed; trust revoked");
         return true;
     }
 

@@ -10,8 +10,8 @@ android {
         applicationId = "dev.watchtrust"
         minSdk = 26
         targetSdk = 35
-        versionCode = 100
-        versionName = "1.0-clean"
+        versionCode = 101
+        versionName = "1.1-bouncer"
     }
 
     buildTypes {
@@ -27,5 +27,6 @@ android {
 
 dependencies {
     compileOnly(project(":system-stubs"))
+    compileOnly("io.github.libxposed:api:102.0.0")
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
 }
