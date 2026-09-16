@@ -1,10 +1,5 @@
 package dev.watchtrust;
 
-import android.app.KeyguardManager;
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.SystemClock;
 import android.service.trust.TrustAgentService;
 import android.util.Log;
@@ -17,42 +12,16 @@ public final class WatchTrustAgent extends TrustAgentService {
     private static volatile WatchTrustAgent instance;
     private static volatile long manualTestUntilElapsed = 0L;
 
-    private KeyguardManager keyguardManager;
-
-    private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (Intent.ACTION_SCREEN_ON.equals(action)) {
-                handleScreenOn();
-            } else if (Intent.ACTION_SCREEN_OFF.equals(action)) {
-                Log.i(TAG, "SCREEN_OFF");
-            }
-        }
-    };
-
     @Override
     public void onCreate() {
         super.onCreate();
         instance = this;
-        keyguardManager = getSystemService(KeyguardManager.class);
-
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(Intent.ACTION_SCREEN_ON);
-        filter.addAction(Intent.ACTION_SCREEN_OFF);
-        registerReceiver(screenReceiver, filter);
-
         setManagingTrust(true);
-        Log.i(TAG, "TrustAgent created; managingTrust=true; screen receiver registered");
+        Log.i(TAG, "TrustAgent created; diagnostic mode; managingTrust=true");
     }
 
     @Override
     public void onDestroy() {
-        try {
-            unregisterReceiver(screenReceiver);
-        } catch (Exception ignored) {
-        }
-
         if (instance == this) instance = null;
         manualTestUntilElapsed = 0L;
         setManagingTrust(false);
@@ -62,89 +31,54 @@ public final class WatchTrustAgent extends TrustAgentService {
 
     @Override
     public void onTrustTimeout() {
-        Log.i(TAG, "Trust timed out; manualArmed=" + isManualTestArmed());
+        Log.i(TAG, "CB onTrustTimeout; manualArmed=" + isManualTestArmed());
     }
 
     @Override
     public void onDeviceLocked() {
-        boolean watchEligible = WatchStateStore.isEligible();
-        boolean manualArmed = isManualTestArmed();
-
-        Log.i(TAG, "Phone device locked; watchEligible=" + watchEligible
-                + " manualArmed=" + manualArmed);
-
-        // IMPORTANT: do not re-grant with DISMISS_KEYGUARD here.
-        // onDeviceLocked() is also called when the user intentionally turns
-        // the screen off. Re-granting here wakes/unlocks the phone immediately.
-        // We now wait for ACTION_SCREEN_ON and only then perform the renewal.
+        Log.i(TAG, "CB onDeviceLocked; watchEligible=" + WatchStateStore.isEligible()
+                + " manualArmed=" + isManualTestArmed());
     }
 
     @Override
     public void onDeviceUnlocked() {
-        Log.i(TAG, "Phone device unlocked");
+        Log.i(TAG, "CB onDeviceUnlocked");
+    }
+
+    @Override
+    public void onUnlockAttempt(boolean successful) {
+        Log.i(TAG, "CB onUnlockAttempt successful=" + successful
+                + " manualArmed=" + isManualTestArmed());
+    }
+
+    @Override
+    public void onUserMayRequestUnlock() {
+        Log.i(TAG, "CB onUserMayRequestUnlock; watchEligible=" + WatchStateStore.isEligible()
+                + " manualArmed=" + isManualTestArmed());
     }
 
     @Override
     public void onUserRequestedUnlock(boolean dismissKeyguard) {
-        boolean watchEligible = WatchStateStore.isEligible();
-        boolean manualArmed = isManualTestArmed();
-        boolean eligible = watchEligible || manualArmed;
+        Log.i(TAG, "CB onUserRequestedUnlock dismiss=" + dismissKeyguard
+                + " watchEligible=" + WatchStateStore.isEligible()
+                + " manualArmed=" + isManualTestArmed());
 
-        Log.i(TAG, "onUserRequestedUnlock dismiss=" + dismissKeyguard
-                + " watchEligible=" + watchEligible
-                + " manualArmed=" + manualArmed
-                + " eligible=" + eligible);
-
-        if (!eligible) {
-            return;
-        }
-
-        grantUnlockTrust(manualArmed ? "WatchTrust manual active unlock" : "Xiaomi Watch 5");
-    }
-
-    private void handleScreenOn() {
-        boolean watchEligible = WatchStateStore.isEligible();
-        boolean manualArmed = isManualTestArmed();
-        boolean eligible = watchEligible || manualArmed;
-        boolean deviceLocked = keyguardManager != null && keyguardManager.isDeviceLocked();
-
-        Log.i(TAG, "SCREEN_ON; deviceLocked=" + deviceLocked
-                + " watchEligible=" + watchEligible
-                + " manualArmed=" + manualArmed
-                + " eligible=" + eligible);
-
-        if (deviceLocked && eligible) {
-            grantUnlockTrust(manualArmed
-                    ? "WatchTrust manual screen-on unlock"
-                    : "Xiaomi Watch 5");
-        }
-    }
-
-    private void grantUnlockTrust(String message) {
-        int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
-                | FLAG_GRANT_TRUST_INITIATED_BY_USER
-                | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
-
-        grantTrust(message, TRUST_MS, flags);
-        Log.i(TAG, "Screen-on unlock grant sent; flags=" + flags + " message=" + message);
-    }
-
-    private void grantPassiveTrust() {
-        grantTrust("Xiaomi Watch 5", TRUST_MS, FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE);
-        Log.i(TAG, "Passive trust granted for " + TRUST_MS + " ms");
+        // Diagnostic build: deliberately DO NOT call grantTrust() here.
+        // We first want to see which callback fires exactly when the user swipes
+        // to the credential/bouncer screen on this PixelOS Android 17 build.
     }
 
     public static void onWatchStateChanged() {
         WatchTrustAgent agent = instance;
         if (agent == null) return;
 
-        if (WatchStateStore.isEligible()) {
-            // Keep renewable trust alive while the watch is eligible, but do
-            // not force-dismiss keyguard just because the watch state changed.
-            agent.grantPassiveTrust();
-        } else {
+        // Diagnostic build: never auto-unlock from watch state changes.
+        // Revoke when watch becomes ineligible so stale trust cannot survive.
+        if (!WatchStateStore.isEligible()) {
             agent.revokeTrust();
-            Log.i(TAG, "Trust revoked because watch is not eligible");
+            Log.i(TAG, "Watch became ineligible; trust revoked");
+        } else {
+            Log.i(TAG, "Watch eligible state received; diagnostic mode does not grant trust");
         }
     }
 
@@ -154,11 +88,15 @@ public final class WatchTrustAgent extends TrustAgentService {
 
         manualTestUntilElapsed = SystemClock.elapsedRealtime() + MANUAL_TEST_MS;
 
+        // Arm a renewable trust window while the phone is already unlocked.
+        // After the screen is turned off, Android can downgrade it to TRUSTABLE.
+        // The diagnostic callbacks above will reveal what happens when the user
+        // explicitly swipes to the PIN/password bouncer. No callback re-grants.
         int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
-                | FLAG_GRANT_TRUST_INITIATED_BY_USER
-                | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
-        agent.grantTrust("WatchTrust manual test", TRUST_MS, flags);
-        Log.i(TAG, "Manual test armed for " + MANUAL_TEST_MS + " ms; flags=" + flags);
+                | FLAG_GRANT_TRUST_INITIATED_BY_USER;
+        agent.grantTrust("WatchTrust diagnostic arm", TRUST_MS, flags);
+        Log.i(TAG, "Diagnostic manual window armed for " + MANUAL_TEST_MS
+                + " ms; initial renewable grant flags=" + flags);
         return true;
     }
 
@@ -167,7 +105,7 @@ public final class WatchTrustAgent extends TrustAgentService {
         manualTestUntilElapsed = 0L;
         if (agent == null) return false;
         agent.revokeTrust();
-        Log.i(TAG, "Manual test disarmed; trust revoked");
+        Log.i(TAG, "Diagnostic manual window disarmed; trust revoked");
         return true;
     }
 
