@@ -36,13 +36,27 @@ public final class WatchTrustAgent extends TrustAgentService {
 
     @Override
     public void onDeviceLocked() {
-        Log.i(TAG, "Phone device locked; watchEligible=" + WatchStateStore.isEligible()
-                + " manualArmed=" + isManualTestArmed());
+        boolean watchEligible = WatchStateStore.isEligible();
+        boolean manualArmed = isManualTestArmed();
 
-        // Do not re-grant the manual test here. For the manual test we intentionally let
-        // renewable trust downgrade to TRUSTABLE and wait for onUserRequestedUnlock().
-        // That tests the same Active Unlock path the watch will use.
-        if (WatchStateStore.isEligible()) {
+        Log.i(TAG, "Phone device locked; watchEligible=" + watchEligible
+                + " manualArmed=" + manualArmed);
+
+        // Narrow diagnostic experiment:
+        // Android reliably calls onDeviceLocked() on this device, while
+        // onUserRequestedUnlock() is not observed. If manual test is armed,
+        // re-grant renewable trust immediately from this callback so we can
+        // test TRUSTABLE -> TRUSTED renewal independently of the watch side.
+        if (manualArmed) {
+            int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
+                    | FLAG_GRANT_TRUST_INITIATED_BY_USER
+                    | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
+            grantTrust("WatchTrust manual locked regrant", TRUST_MS, flags);
+            Log.i(TAG, "Manual locked regrant sent; flags=" + flags);
+            return;
+        }
+
+        if (watchEligible) {
             grantPassiveTrust();
         }
     }
