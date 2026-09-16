@@ -11,6 +11,8 @@ public class TrustAgentService {
     public void onTrustTimeout() {}
     public void onDeviceLocked() {}
     public void onDeviceUnlocked() {}
+    public void onUnlockAttempt(boolean successful) {}
+    public void onUserMayRequestUnlock() {}
     public void onUserRequestedUnlock(boolean dismissKeyguard) {}
 
     public final void setManagingTrust(boolean managingTrust) {}
