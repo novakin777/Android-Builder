@@ -1,6 +1,6 @@
 id=watchtrust_clean
 name=WatchTrust Clean
-version=1.4-ipc
-versionCode=104
+version=1.5-ipc
+versionCode=105
 author=OpenAI + novakin777
-description=Privileged TrustAgent with LSPosed SystemUI bouncer IPC bridge.
+description=Privileged TrustAgent with LSPosed SystemUI bouncer IPC bridge and forced system APK refresh.
