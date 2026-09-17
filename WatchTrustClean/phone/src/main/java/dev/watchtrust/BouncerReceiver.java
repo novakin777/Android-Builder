@@ -22,6 +22,6 @@ public final class BouncerReceiver extends BroadcastReceiver {
         Log.i(TAG, "Bouncer signal received; reason=" + reason
                 + " scrimmed=" + scrimmed);
 
-        WatchTrustAgent.onBouncerShown(reason);
+        WatchTrustAgent.onBouncerShown(context, reason);
     }
 }
