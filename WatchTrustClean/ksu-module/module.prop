@@ -1,6 +1,6 @@
 id=watchtrust_clean
 name=WatchTrust Clean
-version=1.2-legacy
-versionCode=102
+version=1.3-diag
+versionCode=103
 author=OpenAI + novakin777
-description=Privileged TrustAgent + LSPosed SystemUI bouncer hook for WatchTrust.
+description=Privileged TrustAgent with diagnostic legacy LSPosed SystemUI bouncer hook.

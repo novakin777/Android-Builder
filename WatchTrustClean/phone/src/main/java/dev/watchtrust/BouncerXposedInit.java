@@ -11,7 +11,7 @@ import java.lang.reflect.Method;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public final class BouncerXposedInit implements IXposedHookLoadPackage {
@@ -25,51 +25,81 @@ public final class BouncerXposedInit implements IXposedHookLoadPackage {
 
     private static volatile long lastSignalElapsed;
 
+    static {
+        bridgeLog("[WTX] BouncerXposedInit <clinit>");
+        Log.i(TAG, "BouncerXposedInit static initializer");
+    }
+
+    public BouncerXposedInit() {
+        bridgeLog("[WTX] BouncerXposedInit constructor");
+        Log.i(TAG, "BouncerXposedInit constructor");
+    }
+
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
+        String packageName = lpparam == null ? "<null>" : String.valueOf(lpparam.packageName);
+        String processName = lpparam == null ? "<null>" : String.valueOf(lpparam.processName);
+        bridgeLog("[WTX] handleLoadPackage ENTER package=" + packageName
+                + " process=" + processName);
+
         if (lpparam == null || !SYSTEMUI.equals(lpparam.packageName)) {
             return;
         }
 
-        Log.i(TAG, "Legacy entrypoint loaded in SystemUI");
+        bridgeLog("[WTX] SystemUI callback confirmed; classLoader=" + lpparam.classLoader);
+        Log.i(TAG, "Legacy handleLoadPackage reached for SystemUI");
 
         try {
-            XposedHelpers.findAndHookMethod(
-                    BOUNCER,
-                    lpparam.classLoader,
+            Class<?> bouncerClass = Class.forName(BOUNCER, false, lpparam.classLoader);
+            bridgeLog("[WTX] bouncer class resolved: " + bouncerClass);
+
+            Method show = bouncerClass.getDeclaredMethod(
                     "show",
                     String.class,
-                    boolean.class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            long now = SystemClock.elapsedRealtime();
-                            long previous = lastSignalElapsed;
-                            if (now - previous < DEBOUNCE_MS) {
-                                return;
-                            }
-                            lastSignalElapsed = now;
-
-                            String reason = "null";
-                            boolean scrimmed = false;
-                            try {
-                                if (param.args != null && param.args.length >= 2) {
-                                    reason = String.valueOf(param.args[0]);
-                                    scrimmed = (Boolean) param.args[1];
-                                }
-                            } catch (Throwable t) {
-                                Log.w(TAG, "Could not read show() arguments", t);
-                            }
-
-                            Log.i(TAG, "PrimaryBouncerInteractor.show observed; reason="
-                                    + reason + " scrimmed=" + scrimmed);
-                            sendBouncerSignal(reason, scrimmed);
-                        }
-                    }
+                    boolean.class
             );
-            Log.i(TAG, "Legacy PrimaryBouncerInteractor.show(String, boolean) hook installed");
+            show.setAccessible(true);
+            bridgeLog("[WTX] show(String,boolean) resolved: " + show);
+
+            XposedBridge.hookMethod(show, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    long now = SystemClock.elapsedRealtime();
+                    long previous = lastSignalElapsed;
+                    if (now - previous < DEBOUNCE_MS) {
+                        return;
+                    }
+                    lastSignalElapsed = now;
+
+                    String reason = "null";
+                    boolean scrimmed = false;
+                    try {
+                        if (param.args != null && param.args.length >= 2) {
+                            reason = String.valueOf(param.args[0]);
+                            Object second = param.args[1];
+                            if (second instanceof Boolean) {
+                                scrimmed = (Boolean) second;
+                            }
+                        }
+                    } catch (Throwable t) {
+                        bridgeLog("[WTX] argument read failed: " + t);
+                        XposedBridge.log(t);
+                    }
+
+                    bridgeLog("[WTX] BOUNCER SHOW observed reason=" + reason
+                            + " scrimmed=" + scrimmed);
+                    Log.i(TAG, "PrimaryBouncerInteractor.show observed; reason="
+                            + reason + " scrimmed=" + scrimmed);
+                    sendBouncerSignal(reason, scrimmed);
+                }
+            });
+
+            bridgeLog("[WTX] DIRECT XposedBridge.hookMethod INSTALLED");
+            Log.i(TAG, "Direct legacy bouncer hook installed");
         } catch (Throwable t) {
-            Log.e(TAG, "Failed to install legacy bouncer hook", t);
+            bridgeLog("[WTX] hook install FAILED: " + t);
+            XposedBridge.log(t);
+            Log.e(TAG, "Failed to install direct legacy bouncer hook", t);
         }
     }
 
@@ -77,7 +107,7 @@ public final class BouncerXposedInit implements IXposedHookLoadPackage {
         try {
             Context context = currentApplication();
             if (context == null) {
-                Log.w(TAG, "SystemUI application context unavailable");
+                bridgeLog("[WTX] broadcast aborted: SystemUI Application is null");
                 return;
             }
 
@@ -89,8 +119,11 @@ public final class BouncerXposedInit implements IXposedHookLoadPackage {
             intent.putExtra("reason", reason);
             intent.putExtra("scrimmed", scrimmed);
             context.sendBroadcast(intent);
+            bridgeLog("[WTX] bouncer broadcast SENT");
             Log.i(TAG, "Bouncer signal broadcast sent");
         } catch (Throwable t) {
+            bridgeLog("[WTX] broadcast FAILED: " + t);
+            XposedBridge.log(t);
             Log.e(TAG, "Failed to send bouncer signal", t);
         }
     }
@@ -105,8 +138,20 @@ public final class BouncerXposedInit implements IXposedHookLoadPackage {
                 return (Application) application;
             }
         } catch (Throwable t) {
-            Log.w(TAG, "ActivityThread.currentApplication failed", t);
+            bridgeLog("[WTX] ActivityThread.currentApplication failed: " + t);
+            XposedBridge.log(t);
         }
         return null;
+    }
+
+    private static void bridgeLog(String message) {
+        try {
+            XposedBridge.log(message);
+        } catch (Throwable ignored) {
+            try {
+                Log.i(TAG, message);
+            } catch (Throwable ignoredAgain) {
+            }
+        }
     }
 }
