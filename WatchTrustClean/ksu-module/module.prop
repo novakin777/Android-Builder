@@ -1,6 +1,6 @@
 id=watchtrust_clean
 name=WatchTrust Clean
-version=1.5-ipc
-versionCode=105
+version=1.6-wear-diag
+versionCode=106
 author=OpenAI + novakin777
-description=Privileged TrustAgent with LSPosed SystemUI bouncer IPC bridge and forced system APK refresh.
+description=Privileged TrustAgent with LSPosed bouncer IPC and Wear Data Layer diagnostics.
