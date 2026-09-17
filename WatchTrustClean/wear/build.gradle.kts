@@ -10,8 +10,8 @@ android {
         applicationId = "dev.watchtrust"
         minSdk = 30
         targetSdk = 35
-        versionCode = 101
-        versionName = "1.1-wear-diag"
+        versionCode = 102
+        versionName = "1.2-query"
     }
 
     buildTypes {
