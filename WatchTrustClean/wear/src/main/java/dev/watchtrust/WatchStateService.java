@@ -18,6 +18,8 @@ import android.util.Log;
 import com.google.android.gms.tasks.Tasks;
 import com.google.android.gms.wearable.CapabilityClient;
 import com.google.android.gms.wearable.CapabilityInfo;
+import com.google.android.gms.wearable.MessageClient;
+import com.google.android.gms.wearable.MessageEvent;
 import com.google.android.gms.wearable.Node;
 import com.google.android.gms.wearable.Wearable;
 
@@ -27,11 +29,13 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public final class WatchStateService extends Service implements SensorEventListener {
+public final class WatchStateService extends Service implements SensorEventListener,
+        MessageClient.OnMessageReceivedListener {
     private static final String TAG = "WatchTrust";
     private static final String CHANNEL = "watchtrust_state";
     private static final int NOTIFICATION_ID = 1001;
-    private static final String PATH = "/watchtrust/state";
+    private static final String STATE_PATH = "/watchtrust/state";
+    private static final String QUERY_PATH = "/watchtrust/query";
     private static final String PHONE_CAPABILITY = "watchtrust_phone";
     private static final long HEARTBEAT_MS = 5_000L;
 
@@ -43,12 +47,13 @@ public final class WatchStateService extends Service implements SensorEventListe
     private SensorManager sensorManager;
     private Sensor offBodySensor;
     private KeyguardManager keyguard;
+    private MessageClient messageClient;
     private volatile boolean onBody;
 
     private final Runnable heartbeat = new Runnable() {
         @Override
         public void run() {
-            sendState();
+            sendState("heartbeat");
             handler.postDelayed(this, HEARTBEAT_MS);
         }
     };
@@ -76,13 +81,18 @@ public final class WatchStateService extends Service implements SensorEventListe
             Log.w(TAG, "TYPE_LOW_LATENCY_OFFBODY_DETECT is not available");
         }
 
+        messageClient = Wearable.getMessageClient(this);
+        messageClient.addListener(this)
+                .addOnSuccessListener(unused -> Log.i(TAG, "Live MessageClient listener registered"))
+                .addOnFailureListener(e -> Log.w(TAG, "Failed to register live MessageClient listener", e));
+
         Log.i(TAG, "WatchStateService onCreate");
         handler.post(heartbeat);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        sendState();
+        sendState("start-command");
         return START_STICKY;
     }
 
@@ -91,6 +101,11 @@ public final class WatchStateService extends Service implements SensorEventListe
         if (instance == this) instance = null;
         handler.removeCallbacksAndMessages(null);
         if (sensorManager != null) sensorManager.unregisterListener(this);
+        if (messageClient != null) {
+            messageClient.removeListener(this)
+                    .addOnSuccessListener(unused -> Log.i(TAG, "Live MessageClient listener removed"))
+                    .addOnFailureListener(e -> Log.w(TAG, "Failed to remove live MessageClient listener", e));
+        }
         io.shutdownNow();
         super.onDestroy();
     }
@@ -104,21 +119,34 @@ public final class WatchStateService extends Service implements SensorEventListe
                 && event.values.length > 0) {
             onBody = event.values[0] >= 0.5f;
             Log.i(TAG, "onBody=" + onBody);
-            sendState();
+            sendState("off-body-change");
         }
     }
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
 
+    @Override
+    public void onMessageReceived(MessageEvent event) {
+        Log.i(TAG, "Live Wear message received: path=" + event.getPath()
+                + " sourceNodeId=" + event.getSourceNodeId());
+
+        if (!QUERY_PATH.equals(event.getPath())) {
+            return;
+        }
+
+        Log.i(TAG, "Watch query received by live service; replying immediately");
+        sendState("query-response");
+    }
+
     public static boolean requestImmediateState() {
         WatchStateService service = instance;
         if (service == null) return false;
-        service.sendState();
+        service.sendState("listener-service-fallback");
         return true;
     }
 
-    private void sendState() {
+    private void sendState(String reason) {
         final boolean unlocked = keyguard != null && !keyguard.isDeviceLocked();
         final boolean body = onBody;
         final String payload = (body ? "1" : "0") + "," + (unlocked ? "1" : "0");
@@ -148,16 +176,18 @@ public final class WatchStateService extends Service implements SensorEventListe
                 byte[] data = payload.getBytes(StandardCharsets.UTF_8);
                 for (Node node : nodes) {
                     int requestId = Tasks.await(
-                            Wearable.getMessageClient(this).sendMessage(node.getId(), PATH, data));
+                            Wearable.getMessageClient(this).sendMessage(node.getId(), STATE_PATH, data));
                     Log.i(TAG, "sendMessage OK requestId=" + requestId
                             + " nodeId=" + node.getId()
-                            + " payload=" + payload);
+                            + " payload=" + payload
+                            + " reason=" + reason);
                 }
                 Log.i(TAG, "Sent watch state: " + payload
+                        + " reason=" + reason
                         + " nodes=" + nodes.size()
                         + " capabilityNodes=" + capabilityNodes.size());
             } catch (Exception e) {
-                Log.w(TAG, "Failed to send watch state", e);
+                Log.w(TAG, "Failed to send watch state; reason=" + reason, e);
             }
         });
     }
