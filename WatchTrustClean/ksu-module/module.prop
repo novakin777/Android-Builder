@@ -1,6 +1,6 @@
 id=watchtrust_clean
 name=WatchTrust Clean
-version=1.6-wear-diag
-versionCode=106
+version=1.7-stable
+versionCode=107
 author=OpenAI + novakin777
-description=Privileged TrustAgent with LSPosed bouncer IPC and Wear Data Layer diagnostics.
+description=Privileged TrustAgent with LSPosed bouncer IPC and Wear Data Layer watch state trust.
