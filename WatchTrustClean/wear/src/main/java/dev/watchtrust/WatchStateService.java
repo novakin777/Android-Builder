@@ -35,6 +35,8 @@ public final class WatchStateService extends Service implements SensorEventListe
     private static final String PHONE_CAPABILITY = "watchtrust_phone";
     private static final long HEARTBEAT_MS = 5_000L;
 
+    private static volatile WatchStateService instance;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
 
@@ -54,6 +56,7 @@ public final class WatchStateService extends Service implements SensorEventListe
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         createChannel();
         startForeground(NOTIFICATION_ID,
                 new Notification.Builder(this, CHANNEL)
@@ -85,6 +88,7 @@ public final class WatchStateService extends Service implements SensorEventListe
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         handler.removeCallbacksAndMessages(null);
         if (sensorManager != null) sensorManager.unregisterListener(this);
         io.shutdownNow();
@@ -106,6 +110,13 @@ public final class WatchStateService extends Service implements SensorEventListe
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+
+    public static boolean requestImmediateState() {
+        WatchStateService service = instance;
+        if (service == null) return false;
+        service.sendState();
+        return true;
+    }
 
     private void sendState() {
         final boolean unlocked = keyguard != null && !keyguard.isDeviceLocked();
