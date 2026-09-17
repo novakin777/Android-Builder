@@ -20,6 +20,7 @@ public final class WearBridgeService extends WearableListenerService {
 
     @Override
     public void onPeerConnected(Node peer) {
+        WatchStateStore.markConnected();
         Log.i(TAG, "Wear peer connected: id=" + peer.getId()
                 + " name=" + peer.getDisplayName()
                 + " nearby=" + peer.isNearby());
@@ -27,8 +28,10 @@ public final class WearBridgeService extends WearableListenerService {
 
     @Override
     public void onPeerDisconnected(Node peer) {
+        WatchStateStore.markDisconnected();
         Log.i(TAG, "Wear peer disconnected: id=" + peer.getId()
                 + " name=" + peer.getDisplayName());
+        WatchTrustAgent.onWatchStateChanged();
     }
 
     @Override
@@ -52,7 +55,10 @@ public final class WearBridgeService extends WearableListenerService {
         boolean onBody = "1".equals(parts[0]);
         boolean unlocked = "1".equals(parts[1]);
         WatchStateStore.update(onBody, unlocked);
-        Log.i(TAG, "Watch state: onBody=" + onBody + " unlocked=" + unlocked);
+        Log.i(TAG, "Watch state: onBody=" + onBody
+                + " unlocked=" + unlocked
+                + " connected=" + WatchStateStore.isConnected()
+                + " ageMs=" + WatchStateStore.ageMs());
         WatchTrustAgent.onWatchStateChanged();
     }
 }
