@@ -16,11 +16,14 @@ import android.os.Looper;
 import android.util.Log;
 
 import com.google.android.gms.tasks.Tasks;
+import com.google.android.gms.wearable.CapabilityClient;
+import com.google.android.gms.wearable.CapabilityInfo;
 import com.google.android.gms.wearable.Node;
 import com.google.android.gms.wearable.Wearable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -29,6 +32,7 @@ public final class WatchStateService extends Service implements SensorEventListe
     private static final String CHANNEL = "watchtrust_state";
     private static final int NOTIFICATION_ID = 1001;
     private static final String PATH = "/watchtrust/state";
+    private static final String PHONE_CAPABILITY = "watchtrust_phone";
     private static final long HEARTBEAT_MS = 5_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -69,6 +73,7 @@ public final class WatchStateService extends Service implements SensorEventListe
             Log.w(TAG, "TYPE_LOW_LATENCY_OFFBODY_DETECT is not available");
         }
 
+        Log.i(TAG, "WatchStateService onCreate");
         handler.post(heartbeat);
     }
 
@@ -110,11 +115,36 @@ public final class WatchStateService extends Service implements SensorEventListe
         io.execute(() -> {
             try {
                 List<Node> nodes = Tasks.await(Wearable.getNodeClient(this).getConnectedNodes());
+                for (Node node : nodes) {
+                    Log.i(TAG, "Connected node: id=" + node.getId()
+                            + " name=" + node.getDisplayName()
+                            + " nearby=" + node.isNearby());
+                }
+
+                CapabilityInfo capabilityInfo = Tasks.await(
+                        Wearable.getCapabilityClient(this).getCapability(
+                                PHONE_CAPABILITY,
+                                CapabilityClient.FILTER_REACHABLE));
+                Set<Node> capabilityNodes = capabilityInfo.getNodes();
+                Log.i(TAG, "Capability " + PHONE_CAPABILITY
+                        + " reachableNodes=" + capabilityNodes.size());
+                for (Node node : capabilityNodes) {
+                    Log.i(TAG, "Capability node: id=" + node.getId()
+                            + " name=" + node.getDisplayName()
+                            + " nearby=" + node.isNearby());
+                }
+
                 byte[] data = payload.getBytes(StandardCharsets.UTF_8);
                 for (Node node : nodes) {
-                    Tasks.await(Wearable.getMessageClient(this).sendMessage(node.getId(), PATH, data));
+                    int requestId = Tasks.await(
+                            Wearable.getMessageClient(this).sendMessage(node.getId(), PATH, data));
+                    Log.i(TAG, "sendMessage OK requestId=" + requestId
+                            + " nodeId=" + node.getId()
+                            + " payload=" + payload);
                 }
-                Log.i(TAG, "Sent watch state: " + payload + " nodes=" + nodes.size());
+                Log.i(TAG, "Sent watch state: " + payload
+                        + " nodes=" + nodes.size()
+                        + " capabilityNodes=" + capabilityNodes.size());
             } catch (Exception e) {
                 Log.w(TAG, "Failed to send watch state", e);
             }
