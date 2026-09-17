@@ -4,13 +4,23 @@ import android.os.SystemClock;
 import android.service.trust.TrustAgentService;
 import android.util.Log;
 
+import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.Wearable;
+
+import java.nio.charset.StandardCharsets;
+
 public final class WatchTrustAgent extends TrustAgentService {
     private static final String TAG = "WatchTrust";
+    private static final String QUERY_PATH = "/watchtrust/query";
     private static final long TRUST_MS = 20_000L;
     private static final long MANUAL_TEST_MS = 30_000L;
+    private static final long FRESH_CACHE_MS = 5_000L;
+    private static final long QUERY_TIMEOUT_MS = 2_500L;
 
     private static volatile WatchTrustAgent instance;
     private static volatile long manualTestUntilElapsed = 0L;
+    private static volatile long pendingQueryUntilElapsed = 0L;
+    private static volatile String pendingQueryReason = null;
 
     @Override
     public void onCreate() {
@@ -24,6 +34,7 @@ public final class WatchTrustAgent extends TrustAgentService {
     public void onDestroy() {
         if (instance == this) instance = null;
         manualTestUntilElapsed = 0L;
+        clearPendingQuery();
         setManagingTrust(false);
         Log.i(TAG, "TrustAgent destroyed");
         super.onDestroy();
@@ -44,6 +55,7 @@ public final class WatchTrustAgent extends TrustAgentService {
 
     @Override
     public void onDeviceUnlocked() {
+        clearPendingQuery();
         Log.i(TAG, "CB onDeviceUnlocked");
     }
 
@@ -69,36 +81,59 @@ public final class WatchTrustAgent extends TrustAgentService {
             return;
         }
 
-        boolean watchEligible = WatchStateStore.isEligible();
         boolean manualArmed = isManualTestArmed();
-        boolean eligible = watchEligible || manualArmed;
+        long ageMs = WatchStateStore.ageMs();
+        boolean freshEligible = WatchStateStore.isEligible() && ageMs <= FRESH_CACHE_MS;
 
         Log.i(TAG, "Bouncer shown; reason=" + reason
-                + " watchEligible=" + watchEligible
+                + " freshEligible=" + freshEligible
                 + " connected=" + WatchStateStore.isConnected()
                 + " onBody=" + WatchStateStore.isOnBody()
                 + " watchUnlocked=" + WatchStateStore.isUnlocked()
-                + " ageMs=" + WatchStateStore.ageMs()
-                + " manualArmed=" + manualArmed
-                + " eligible=" + eligible);
+                + " ageMs=" + ageMs
+                + " manualArmed=" + manualArmed);
 
-        if (!eligible) {
+        if (manualArmed) {
+            grantDismiss(agent, "WatchTrust manual bouncer unlock");
             return;
         }
 
-        int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
-                | FLAG_GRANT_TRUST_INITIATED_BY_USER
-                | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
+        if (freshEligible) {
+            grantDismiss(agent, "Xiaomi Watch 5 (fresh cache)");
+            return;
+        }
 
-        agent.grantTrust(
-                manualArmed
-                        ? "WatchTrust manual bouncer unlock"
-                        : "Xiaomi Watch 5",
-                TRUST_MS,
-                flags
-        );
+        pendingQueryUntilElapsed = SystemClock.elapsedRealtime() + QUERY_TIMEOUT_MS;
+        pendingQueryReason = reason;
+        requestFreshWatchState(agent);
+    }
 
-        Log.i(TAG, "Bouncer unlock grant sent; flags=" + flags);
+    private static void requestFreshWatchState(WatchTrustAgent agent) {
+        final byte[] payload = Long.toString(SystemClock.elapsedRealtime())
+                .getBytes(StandardCharsets.UTF_8);
+
+        Wearable.getNodeClient(agent).getConnectedNodes()
+                .addOnSuccessListener(nodes -> {
+                    if (nodes.isEmpty()) {
+                        Log.w(TAG, "Watch query not sent: no connected Wear nodes");
+                        clearPendingQuery();
+                        return;
+                    }
+
+                    for (Node node : nodes) {
+                        Wearable.getMessageClient(agent)
+                                .sendMessage(node.getId(), QUERY_PATH, payload)
+                                .addOnSuccessListener(requestId -> Log.i(TAG,
+                                        "Watch query sent: requestId=" + requestId
+                                                + " nodeId=" + node.getId()))
+                                .addOnFailureListener(e -> Log.w(TAG,
+                                        "Watch query send failed: nodeId=" + node.getId(), e));
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    Log.w(TAG, "Failed to enumerate Wear nodes for query", e);
+                    clearPendingQuery();
+                });
     }
 
     public static void onWatchStateChanged() {
@@ -106,21 +141,49 @@ public final class WatchTrustAgent extends TrustAgentService {
         if (agent == null) return;
 
         if (!WatchStateStore.isEligible()) {
+            clearPendingQuery();
             agent.revokeTrust();
             Log.i(TAG, "Watch became ineligible; trust revoked"
                     + " connected=" + WatchStateStore.isConnected()
                     + " onBody=" + WatchStateStore.isOnBody()
                     + " unlocked=" + WatchStateStore.isUnlocked()
                     + " ageMs=" + WatchStateStore.ageMs());
+            return;
         }
+
+        long now = SystemClock.elapsedRealtime();
+        if (pendingQueryUntilElapsed != 0L && now <= pendingQueryUntilElapsed) {
+            String reason = pendingQueryReason;
+            clearPendingQuery();
+            Log.i(TAG, "Fresh watch response accepted for pending bouncer; reason=" + reason
+                    + " ageMs=" + WatchStateStore.ageMs());
+            grantDismiss(agent, "Xiaomi Watch 5 (query response)");
+        } else if (pendingQueryUntilElapsed != 0L) {
+            Log.i(TAG, "Watch query response arrived after timeout; ageMs="
+                    + WatchStateStore.ageMs());
+            clearPendingQuery();
+        }
+    }
+
+    private static void grantDismiss(WatchTrustAgent agent, String message) {
+        int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
+                | FLAG_GRANT_TRUST_INITIATED_BY_USER
+                | FLAG_GRANT_TRUST_DISMISS_KEYGUARD;
+
+        agent.grantTrust(message, TRUST_MS, flags);
+        Log.i(TAG, "Bouncer unlock grant sent; flags=" + flags + " source=" + message);
+    }
+
+    private static void clearPendingQuery() {
+        pendingQueryUntilElapsed = 0L;
+        pendingQueryReason = null;
     }
 
     public static boolean manualGrantAndDismiss() {
         WatchTrustAgent agent = instance;
         if (agent == null) return false;
 
-        manualTestUntilElapsed =
-                SystemClock.elapsedRealtime() + MANUAL_TEST_MS;
+        manualTestUntilElapsed = SystemClock.elapsedRealtime() + MANUAL_TEST_MS;
 
         int flags = FLAG_GRANT_TRUST_TEMPORARY_AND_RENEWABLE
                 | FLAG_GRANT_TRUST_INITIATED_BY_USER;
@@ -134,6 +197,7 @@ public final class WatchTrustAgent extends TrustAgentService {
     public static boolean manualRevoke() {
         WatchTrustAgent agent = instance;
         manualTestUntilElapsed = 0L;
+        clearPendingQuery();
 
         if (agent == null) return false;
 
