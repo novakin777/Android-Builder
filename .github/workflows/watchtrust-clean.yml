@@ -116,8 +116,8 @@ jobs:
           rm -rf dist
           mkdir -p dist/module/system/etc/permissions
 
-          # Keep the APK as installer payload. customize.sh deletes any stale
-          # system-app directory and writes it to the fresh WatchTrust105 path.
+          # Keep the APK as installer payload. customize.sh removes stale
+          # system-app directories and writes it to the fresh WatchTrust106 path.
           cp "$PROJECT_DIR/phone/build/outputs/apk/debug/phone-debug.apk" \
             dist/module/watchtrust-phone.apk
           cp "$PROJECT_DIR/ksu-module/module.prop" dist/module/module.prop
