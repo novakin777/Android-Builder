@@ -1,6 +1,6 @@
 id=watchtrust_clean
 name=WatchTrust Clean
-version=1.8-sleep-resilient
-versionCode=108
+version=1.9-query
+versionCode=109
 author=OpenAI + novakin777
-description=Privileged TrustAgent with LSPosed bouncer IPC and sleep-resilient Wear state tracking.
+description=Privileged TrustAgent with LSPosed bouncer IPC and on-demand Wear state query before unlock.
