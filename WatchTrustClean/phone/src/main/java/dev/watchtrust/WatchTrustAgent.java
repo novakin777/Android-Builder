@@ -37,6 +37,8 @@ public final class WatchTrustAgent extends TrustAgentService {
     @Override
     public void onDeviceLocked() {
         Log.i(TAG, "CB onDeviceLocked; watchEligible=" + WatchStateStore.isEligible()
+                + " connected=" + WatchStateStore.isConnected()
+                + " ageMs=" + WatchStateStore.ageMs()
                 + " manualArmed=" + isManualTestArmed());
     }
 
@@ -73,6 +75,10 @@ public final class WatchTrustAgent extends TrustAgentService {
 
         Log.i(TAG, "Bouncer shown; reason=" + reason
                 + " watchEligible=" + watchEligible
+                + " connected=" + WatchStateStore.isConnected()
+                + " onBody=" + WatchStateStore.isOnBody()
+                + " watchUnlocked=" + WatchStateStore.isUnlocked()
+                + " ageMs=" + WatchStateStore.ageMs()
                 + " manualArmed=" + manualArmed
                 + " eligible=" + eligible);
 
@@ -101,7 +107,11 @@ public final class WatchTrustAgent extends TrustAgentService {
 
         if (!WatchStateStore.isEligible()) {
             agent.revokeTrust();
-            Log.i(TAG, "Watch became ineligible; trust revoked");
+            Log.i(TAG, "Watch became ineligible; trust revoked"
+                    + " connected=" + WatchStateStore.isConnected()
+                    + " onBody=" + WatchStateStore.isOnBody()
+                    + " unlocked=" + WatchStateStore.isUnlocked()
+                    + " ageMs=" + WatchStateStore.ageMs());
         }
     }
 
