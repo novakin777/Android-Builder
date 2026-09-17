@@ -10,8 +10,8 @@ android {
         applicationId = "dev.watchtrust"
         minSdk = 26
         targetSdk = 35
-        versionCode = 107
-        versionName = "1.7-stable"
+        versionCode = 108
+        versionName = "1.8-sleep-resilient"
     }
 
     buildTypes {
