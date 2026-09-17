@@ -1,5 +1,6 @@
 package dev.watchtrust;
 
+import android.content.Context;
 import android.os.SystemClock;
 import android.service.trust.TrustAgentService;
 import android.util.Log;
@@ -74,7 +75,7 @@ public final class WatchTrustAgent extends TrustAgentService {
         Log.i(TAG, "CB onUserRequestedUnlock dismiss=" + dismissKeyguard);
     }
 
-    public static void onBouncerShown(String reason) {
+    public static void onBouncerShown(Context context, String reason) {
         WatchTrustAgent agent = instance;
         if (agent == null) {
             Log.w(TAG, "Bouncer signal ignored: TrustAgent is not running");
@@ -105,14 +106,14 @@ public final class WatchTrustAgent extends TrustAgentService {
 
         pendingQueryUntilElapsed = SystemClock.elapsedRealtime() + QUERY_TIMEOUT_MS;
         pendingQueryReason = reason;
-        requestFreshWatchState(agent);
+        requestFreshWatchState(context.getApplicationContext());
     }
 
-    private static void requestFreshWatchState(WatchTrustAgent agent) {
+    private static void requestFreshWatchState(Context context) {
         final byte[] payload = Long.toString(SystemClock.elapsedRealtime())
                 .getBytes(StandardCharsets.UTF_8);
 
-        Wearable.getNodeClient(agent).getConnectedNodes()
+        Wearable.getNodeClient(context).getConnectedNodes()
                 .addOnSuccessListener(nodes -> {
                     if (nodes.isEmpty()) {
                         Log.w(TAG, "Watch query not sent: no connected Wear nodes");
@@ -121,7 +122,7 @@ public final class WatchTrustAgent extends TrustAgentService {
                     }
 
                     for (Node node : nodes) {
-                        Wearable.getMessageClient(agent)
+                        Wearable.getMessageClient(context)
                                 .sendMessage(node.getId(), QUERY_PATH, payload)
                                 .addOnSuccessListener(requestId -> Log.i(TAG,
                                         "Watch query sent: requestId=" + requestId
