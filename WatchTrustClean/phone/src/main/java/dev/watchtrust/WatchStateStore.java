@@ -3,7 +3,7 @@ package dev.watchtrust;
 import android.os.SystemClock;
 
 public final class WatchStateStore {
-    private static final long MAX_AGE_MS = 12_000L;
+    private static final long MAX_AGE_MS = 20_000L;
 
     private static volatile boolean onBody;
     private static volatile boolean unlocked;
