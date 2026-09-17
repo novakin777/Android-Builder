@@ -10,8 +10,8 @@ android {
         applicationId = "dev.watchtrust"
         minSdk = 26
         targetSdk = 35
-        versionCode = 104
-        versionName = "1.4-ipc"
+        versionCode = 105
+        versionName = "1.5-ipc"
     }
 
     buildTypes {
