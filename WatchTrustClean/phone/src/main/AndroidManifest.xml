@@ -47,8 +47,7 @@
 
         <receiver
             android:name=".BouncerReceiver"
-            android:exported="true"
-            android:permission="android.permission.STATUS_BAR_SERVICE">
+            android:exported="true">
             <intent-filter>
                 <action android:name="dev.watchtrust.action.BOUNCER_SHOWN" />
             </intent-filter>
