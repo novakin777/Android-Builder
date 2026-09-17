@@ -114,11 +114,12 @@ jobs:
         run: |
           set -euxo pipefail
           rm -rf dist
-          mkdir -p dist/module/system/priv-app/WatchTrust
           mkdir -p dist/module/system/etc/permissions
 
+          # Keep the APK as installer payload. customize.sh deletes any stale
+          # system-app directory and writes it to the fresh WatchTrust105 path.
           cp "$PROJECT_DIR/phone/build/outputs/apk/debug/phone-debug.apk" \
-            dist/module/system/priv-app/WatchTrust/WatchTrust.apk
+            dist/module/watchtrust-phone.apk
           cp "$PROJECT_DIR/ksu-module/module.prop" dist/module/module.prop
           cp "$PROJECT_DIR/ksu-module/customize.sh" dist/module/customize.sh
           cp "$PROJECT_DIR/ksu-module/system/etc/permissions/privapp-permissions-watchtrust.xml" \
